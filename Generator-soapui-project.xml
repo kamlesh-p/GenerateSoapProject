@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<con:soapui-project id="21346837-2cb3-4bd8-a9fa-0d9438ec8698" activeEnvironment="Default environment" name="Generator" lastOpened="2018-07-18T14:05:24.256+05:30" resourceRoot="${projectDir}" soapui-version="6.0.0" xmlns:con="http://eviware.com/soapui/config"><con:settings/><con:testSuite id="4a73f084-a137-4ef1-a314-e73b15e9ff08" name="TestSuite"><con:settings/><con:savedRecentRuns>1</con:savedRecentRuns><con:runType>SEQUENTIAL</con:runType><con:testCase id="48720389-57ff-4c0c-909e-9384f828900e" discardOkResults="true" failOnError="true" failTestCaseOnErrors="true" keepSession="false" name="TestCase" searchProperties="true" timeout="0"><con:settings/><con:savedRecentRuns>1</con:savedRecentRuns><con:testStep type="groovy" name="GenerateSoapProject" id="3125ac87-d3b4-4f92-b382-11aac27554ac"><con:settings/><con:config><script>/**
+* Description	: Groovy script to create SoapUI project from wsdl endpoint.
+* Author		: kamlesh
+* Modified By	: 
+* Version 	: 1.0 
+*/
+
+import com.eviware.soapui.impl.wsdl.*  
+import com.eviware.soapui.impl.WsdlInterfaceFactory
+import com.eviware.soapui.impl.wsdl.teststeps.registry.WsdlTestRequestStepFactory
+import static com.eviware.soapui.impl.wsdl.teststeps.registry.GroovyScriptStepFactory.GROOVY_TYPE
+import static com.eviware.soapui.impl.wsdl.teststeps.registry.DataSourceStepFactory.DATASOURCE_TYPE
+import static com.eviware.soapui.impl.wsdl.teststeps.registry.DataSinkStepFactory.DATASINK_TYPE
+import static com.eviware.soapui.impl.wsdl.teststeps.registry.DataSourceLoopStepFactory.DATASOURCELOOP_TYPE
+def groovyUtils = new com.eviware.soapui.support.GroovyUtils( context )  
+
+/** ----- Update Me  ------ **/
+def etId = "kamlesh";
+def projectPath = "D:\\";
+def pathToWSDL = "wsdlpath/service_V1_0?wsdl";
+
+
+
+/**######### - GENERATOR CODE - Internal purpose only -  ########**/
+log.info("Started processing...")
+//get projectName from wsdl path
+def splitPath = pathToWSDL.split("/")
+def projectName = splitPath[splitPath.length - 1].split("\\?")[0];
+def domain = (pathToWSDL.split("services/")[1]).substring(0,4);
+def version = (projectName.split("_V")[1]).replace("_", "")
+def fullProjectPath = "$projectPath$projectName" + "-soapui-project.xml";
+/*---info logs---*/
+log.info ("Project path is $projectPath");
+log.info ("Project name is $projectName");
+log.info ("pathToWSDL $pathToWSDL");
+
+
+def currentProject = testRunner.testCase.testSuite.project;
+def TestSuiteName = projectName + "TestSuite";
+/* create project */
+WsdlProject project = currentProject.getWorkspace().createProject(projectName, new File(fullProjectPath));
+project.setName(projectName);
+project.setResourceRoot("\${projectDir}");
+project.addNewTestSuite(TestSuiteName);
+/* set project properties */
+project.setPropertyValue("ServiceEndpoint", pathToWSDL.split("services")[0] + "services")
+project.setPropertyValue("ReportPath", projectPath.substring(0, 3))
+
+
+WsdlInterface iface = WsdlInterfaceFactory.importWsdl(project,pathToWSDL, true )[0]
+Iterator&lt;com.eviware.soapui.model.iface.Operation> i = iface.getOperationList().iterator();
+WsdlOperation op;
+while (i.hasNext()) {
+    	op = (WsdlOperation) i.next();
+    	def testSuite = project.getTestSuiteByName(TestSuiteName);
+	def tc = testSuite.addNewTestCase(op.name + "TestCase")
+	
+	//add test steps to test case
+	/*-----add Properties test step-------*/
+	/** 	def propertiesTestStep = tc.addTestStep('properties', "properties")
+		propertiesTestStep.setPropertyValue( "name", "value" ) **/
+	
+	/*-----add DataSource test step-------*/
+	def dataSourceTestStep = tc.addTestStep(DATASOURCE_TYPE, "DataSource")
+	dataSourceTestStep.modelItem.dataSource = "Excel"
+	dataSourceTestStep.getDataSource().setFileName(projectName + "/" + domain + op.name.capitalize() + "TestData.xls")
+	dataSourceTestStep.getDataSource().setWorksheet("TestData")
+	dataSourceTestStep.getDataSource().setStartCell("A2")
+		
+	/**----- add RequestHandler groovy test step-------**/
+	tc.addTestStep(GROOVY_TYPE, "requestHandler")
+	
+	/**----- add soap request test step-------**/
+	// factory to create the testStepConfig
+	def factory = new WsdlTestRequestStepFactory()
+	def config = factory.createConfig(op,op.name) 
+	// create the testStep
+	def testStep = tc.addTestStep(config)
+	//update endpoint
+	def endpoint = testStep.getHttpRequest().getEndpoint()
+	testStep.getHttpRequest().setEndpoint( "\${#Project#ServiceEndpoint}" + endpoint.split("services")[1])
+	// Update the request
+	def holder = groovyUtils.getXmlHolder( testStep.properties['Request'].value ) 
+	holder.updateProperty()
+	testStep.properties['Request'].value = holder.getXml()
+
+	/**--------add GroovyScript test step--------**/
+	tc.addTestStep(GROOVY_TYPE, "GroovyScript")
+	
+	/**------ add Datasink test step-------**/
+	def dataSinkTestStep = tc.addTestStep(DATASINK_TYPE, "DataSink")
+	dataSinkTestStep.modelItem.dataSink = "Excel"
+	dataSinkTestStep.getDataSink().setFileName(projectName + "/" + domain + op.name.capitalize() + "Template.xls")
+	dataSinkTestStep.getDataSink().setOutFileName("\${#Project#ReportPath}/" + domain + version + op.name.capitalize() + "Report.xls")
+	dataSinkTestStep.getDataSink().setWorksheet(op.name);
+	dataSinkTestStep.getDataSink().setStartCell("A2")
+	
+	/**------ add DataSourceLoop test step-------**/
+	def dataSourceLoopTestStep =tc.addTestStep(DATASOURCELOOP_TYPE, "DataSourceLoop")
+	dataSourceLoopTestStep.modelItem.dataSourceStep = "DataSource"
+	dataSourceLoopTestStep.modelItem.targetStep = "requestHandler"
+}
+context.testCase.testSuite.project.save("");
+
+log.info ("------------------------------");
+log.info ("fullProjectPath: $fullProjectPath");
+log.info("Done!!!")
+//finally save project
+project.saveAs(fullProjectPath);</script></con:config></con:testStep><con:testStep type="groovy" name="experiment" id="a8c2a2da-9e90-458f-8bb5-d93bfb090009"><con:settings/><con:config><script>
+def groovyUtils = new com.eviware.soapui.support.GroovyUtils( context ) 
+log.info(groovyUtils.projectPath)
+</script></con:config></con:testStep><con:properties/><con:reportParameters/><con:breakPoints><con:testStepId>3125ac87-d3b4-4f92-b382-11aac27554ac</con:testStepId><con:status>NONE</con:status><con:properties/></con:breakPoints></con:testCase><con:properties/><con:reportParameters/></con:testSuite><con:requirements/><con:properties/><con:wssContainer/><con:databaseConnectionContainer/><con:oAuth2ProfileContainer/><con:reporting><con:xmlTemplates/><con:parameters/></con:reporting><con:authRepository/><con:tags/></con:soapui-project>
